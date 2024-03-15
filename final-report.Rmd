@@ -1,0 +1,204 @@
+---
+title: "Math 118: Final Report"
+subtitle: "Gamez-McMillan"
+author: "Dermot McMillan and Matthew Gamez"
+output: pdf_document
+date: "12/08/2022"
+---
+
+```{r packages-data, include = F}
+# load necessary packages
+library(tidyverse)
+library(stringr)
+library(scales)
+library(infer)
+library(broom)
+# load data
+songs <- read.csv("data/songs_clean.csv")
+```
+
+## Introduction
+
+Research question: How has the composition of song genres on the Billboard Hot 100 changed over time? Specifically, how has the popularity of rap changed over time, and what percent of the songs on the Billboard Hot 100 (1999-2019) are rap songs?
+
+The data comes from the Billboard Hot 100. It contains records of the chart history, consisting of variables such as Song, Artist, Album, Genre, Lyrics, Peak position on hot 100, Weeks on the hot 100, date the song was made, and more. Each observation is a song. 
+
+## Methodology
+
+The variables that we are going to be looking at are genre and Week. We would like to explore how popular genres have shifted over time. 
+
+We chose 6 different genres to analyze: Country, R&B, Rock, Rap, Pop and Reggaeton. We felt that these genres were the most distinct and representative of popular genres today. 
+In the original data file, the variable *Genre* was represented as a long string of different "genres" for each song. Some songs had multiple genres, obscure genres like "NBA", or redundant genres. For example "hip-hop" appeared in many *Genre* strings — even for songs that most people would consider pop. "Rap" felt like a more precise and distinct choice. We chose "Reggaeton" because it is an emerging popular genre. Some songs had multiple genres but in these cases songs generally fit both.
+
+We felt visualizations using ggplot would be most effective to answer the research questions. In order to determine a songs genre, we used the str_detect function from the stringr package to test if a song fell into a certain genre. We used the mutate function to create a variable for each genre, (e.x, logi variable *Rap*) . Any of the new genre variables would be TRUE for a song if *Genre* did contain the specified genre string and FALSE if it didn't. We used these parameters to determine the genre makeup of a given week. 
+
+For each week, we calculated the number of TRUEs in each of the logical type genre variables (*Rap*, *Rock*, *R&B*, etc) and the total number of TRUEs over every genre variable for that week. Then, we divided the individual genre counts by the total's for each week to create a proportion for each genre. This will give us a relatively accurate visualization of how much each genre is represented each week on the charts. Obviously we left certain genres out, but the genres we chose were present in every song and were the most comprehensive. 
+
+For rap specifically we chose to see if we could fit a linear model to the trend in total songs that are rap on the chart over time.
+
+
+## Results
+```{r echo = F}
+by_week <- songs%>%
+  mutate(Country = str_detect(Genre, "Country"))%>%
+  mutate("R&B" = str_detect(Genre, "R&;B"))%>%
+  mutate(Rock = str_detect(Genre, "Rock"))%>%
+  mutate(Rap = str_detect(Genre, "Rap"))%>%
+  mutate(Pop = str_detect(Genre, "Pop"))%>%
+  mutate(Reggaeton = str_detect(Genre, "Reggaeton"))%>%
+  mutate(Week = as.Date(Week, "%Y-%m-%d"))
+
+```
+
+```{r echo = F}
+distinct_songs <- songs %>%
+  select(Name, Genre) %>% 
+  mutate(Rap = str_detect(Genre, "Rap")) %>%
+  select(-Genre) %>% 
+  distinct() 
+```
+
+```{r echo = F}
+long_week_data <- by_week %>%
+  pivot_longer(., cols = 12:17, names_to = "genre", values_to = "contains") %>%
+  group_by(Week, genre) %>%
+  mutate(total = sum(contains)) %>%
+  ungroup() %>%
+  distinct(Week, genre, total) %>%
+  group_by(Week) %>%
+  mutate(total_week = sum(total)) %>%
+  ungroup() %>%
+  mutate(prop_week = total/total_week)%>%
+  group_by(Week) 
+```
+
+```{r echo = F}
+wide_week_data <- by_week %>%
+  pivot_longer(., cols = 12:17, names_to = "genre", values_to = "contains") %>%
+  group_by(Week, genre) %>%
+  mutate(total = sum(contains)) %>%
+  subset(contains == TRUE)
+```
+
+```{r echo = F}
+rap_data <- long_week_data %>%
+  filter(genre == "Rap")
+```
+
+```{r echo = F}
+set.seed(1)
+subsample <- distinct_songs %>%
+  slice_sample(prop = .10)
+
+obs_prop <- subsample %>%
+  summarise(prop = mean(Rap)) %>%
+  pull()
+```
+
+```{r echo = F}
+ggplot(data = long_week_data, aes(x = Week, y = prop_week, fill = genre))+
+  geom_area(alpha = 0.8) + 
+  scale_fill_viridis_d(option = "plasma") +
+  labs(title = "Genre makeup of Billboard Top 100 (1999-2019)",
+       y = "Proportion", x = "Year") +
+  scale_x_date(breaks = date_breaks("years"), labels = date_format("'%y"))
+```
+Above is a stacked proportional area graph that shows the genre makeup of the Billboard Hot 100 from the year 1999 to 2019. Songs in multiple genres were counted multiple times. As well, songs do reappear in multiple weeks. In this visualization, we can see the trends of different genre's popularity and variability over 20 years. The x-axis shows the year that the data was relevant, and the y-axis shows the proportions calculated using the method described in the Methodology section.
+
+```{r echo = F, message = FALSE}
+ggplot(data = wide_week_data, aes(x = Week, after_stat(count), fill = genre))+
+  geom_density(position = "fill", alpha = 0.8, size = 0.2) + 
+  scale_fill_viridis_d(option = "plasma") +
+  labs(title = "Genre makeup of Billboard Top 100 (1999-2019)",
+       y = "Proportion", x = "Year") +
+  scale_x_date(breaks = date_breaks("years"), labels = date_format("'%y"))
+```
+Above is a stacked proportional density plot that visualizes the trends of different genre's makeup of the Billboard hot 100 from the years 1999 to 2019. It shows the Smoothed out proportions to get a better idea of the trends in different genres popularity over 20 years. It eliminates the variability in the chart so that it makes the graph more legible, however, it is slightly less accurate on the weekly scale.  
+
+```{r echo = F, message=FALSE}
+ggplot(data = long_week_data, aes(x = Week, y = total, fill = genre))+
+  geom_area(alpha = 0.5, fill = "black") + 
+  facet_wrap(genre ~., scales = "free_y") +
+  stat_smooth(geom = 'area', method = 'loess', span = 1/4,
+        alpha = 0.7, color = "black", size = 0.2) +
+  scale_fill_viridis_d(option = "plasma") +
+  labs(title = "Genre makeup of Billboard Top 100 (1999-2019)",
+       y = "Total", x = "Year") +
+  scale_x_date(breaks = date_breaks("4 years"), labels = date_format("'%y"))
+```
+Above is a faceted proportional area plot that shows each individual genres trend of their Billboard Hot 100 makeup. We overlaid a smoothed area graph over an area graph to visualize these general trends. The y-axis demonstrates the total number of songs on the Billboard 100  in a given genre, and the x-axis shows the year the proportion was seen.
+From this faceted visualization, we can see how country, pop, and R&B have remained around the same totals respectively.
+As well, we can see how much rap and Reggaeton have increased inn popularity, and how Rock has steadily fallen in popularity after 2013. 
+
+
+```{r echo = F, message = FALSE}
+ggplot(data = rap_data, aes(x = Week, y = total)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE)+
+  labs(title = "Linear model of total songs that are rap for each week",
+       y = "Total", x = "Year") 
+```
+Above is the linear model fit to the number of rap songs on the Billboard Hot 100 for each given week. Base on the trend of the data, it does not appear as though a linear model would accurately represent raps trend of the Billboard Hot 100 makeup.
+```{r echo = F}
+rap_data_numeric_week <- rap_data %>%
+  mutate(Week = as.numeric(Week))
+
+mod_rap <- lm (total ~ Week, data = rap_data_numeric_week)
+tidy(mod_rap)
+
+mod_rap_aug <- augment(mod_rap)
+```
+
+```{r echo = F}
+ggplot(mod_rap_aug, mapping = aes(x = .fitted, y = .resid)) +
+  geom_point() + geom_hline(yintercept = 0, lwd = 2, col = "red", lty = 2) +
+  labs(title = "Residual plot of total songs that are rap for each week", x = "Time", y = "Residuals")
+```
+Because there is a clear, identified pattern in the residuals, the model does not satisfy the equal variants and linearity conditions. Therefore a linear model is not appropriate for this data.
+
+## Hypothesis Test
+
+Because our data is not a sample (i.e it's the entire population that we are analyzing), it would be inappropriate to complete a hypothesis test on the data. However, to show our proficiency in hypothesis testing, we created a representative sample from 10% of the data.
+
+Hypothesis question: we found an article online that claimed that 30% of songs on the Billboard Hot 100 were rap songs in 2017. Because of this article, we wanted to test the hypothesis that 30% of songs overall on the Billboard 100 (between 1999-2000) are rap. To reiterate, we know the true proportion (0.354) because we have the entire population but we will test the hypothesis on the sample we made to show that we know how to preform a hypothesis test.
+
+$p_{rap} = \text{Proportion of all distinct songs in the Billboard Hot 100 dataset that are Rap}$
+
+$H_{0}: p_{rap} = 0.3$
+$H_{a}: p_{rap} \ne 0.3$
+
+```{r echo = F}
+set.seed(2)
+null_dist <- subsample %>%
+  specify(response = Rap, success = "TRUE") %>% 
+  hypothesize(null = "point", p = 0.3) %>% 
+  generate(reps = 10000, type = "draw") %>%
+  calculate(stat = "prop")
+```
+
+```{r echo = F}
+null_dist %>%
+  filter(stat >= obs_prop | stat <= (0.3 + (0.3 - obs_prop))) %>%
+  summarise(p_val = n()/nrow(null_dist)) %>%
+  pull(p_val)
+```
+
+Because the $p\text{-}value = 0.0001 <\alpha = 0.05$ we will reject the null hypothesis. This indicates that the proportion of distinct songs on the Billboard Hot 100 (1999-2019) that are rap is not 30%.
+
+```{r echo = F}
+visualise(null_dist) +
+  labs(title = "Null distribution of proportion of songs that are rap on the Billboard 100", subtitle = "(1999-2019)",
+       x = "Proportions", y = "Count")
+```
+Above is a null distribution of 10000 reps that simulates the percentage of rap songs in the Billboard Hot 100. As we can see, the proportion that appears most often is about 0.365 and on either side, the count of each proportion continues to decrease. Because the 30% falls way outside of the distribution, we got a very small p-value.
+
+
+## Discussion
+
+Through our research we were able to see the overall trends in genre makeup on the Billboard Hot 100, and see how each genre's popularity has changed over time, with some staying around the same amount of popularity, while others increase or decrease in popularity week by week over the span of 1999-2019. We were able to see rap's rise in popularity, along with rock's decline in Hot 100 makeup. As well, we can see how the genre Reggaeton is emerging in the global landscape as a dominant musical genre.
+
+As well, we were able to create a hypothesis test to see what proportion of songs on the Billboard Hot 100 were rap songs. However, some challenges with the hypothesis test were that the data was not a sample and instead was actual data from the entire population. So essentially the data given told us the exact answers to our questions. Therefore, we created a sample of this data to show our knowledge of how a hypothesis test works, and we used it to disprove a hypothesis that 30% of songs on the Hot 100 were rap.
+ 
+A way that we could improve our analysis would be if we could see up to present day's Billboard Hot 100 genre makeup because we believe that the proportions would be a lot different then what they were in 2019. With the increase in popularity of rap and reggaeton, their proportions of the Hot 100 would probably be even more than what it was in 2019. In an article by Billboard, it says that in the Billboard overall Top 200 Chart, Reggaeton takes up 13% of the chart and is the third most popular genre on the chart after Rap and Pop, which based on the trends in the data, we could believe that to be true. 
+
+Something that we could do to further this project could be to incorporate more genres in our analysis and to account somehow for songs with multiple genres in a more effective way. 
